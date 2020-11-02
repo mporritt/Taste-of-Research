@@ -34,14 +34,15 @@ class TTVModel:
         
         # Reference values for period and t0
         t0_ref, p_ref, num_transits = self.get_ref_vals(p_ref=p_ref)
-        print(f"Reference parameters: t0 = {t0_ref}, period = {p_ref}")
         self.p_ref = p_ref
         self.t0_ref = t0_ref
         self.num_transits = num_transits
+        print(f"Reference parameters: t0={t0_ref}, period={p_ref}, num_transits={num_transits}")
         
         self.pars = {}    # Dictionary of orbital model parameters
         self.pars['ttvs'] = [0] * self.num_transits    # List of ttvs for each transit
-        self.pars['ttvs_err'] = [0] * self.num_transits
+        self.pars['e_ttvs'] = [0] * self.num_transits
+        self.pars['E_ttvs'] = [0] * self.num_transits
         
         self.save_path = save_path
         self.save_name = f"{self.lightcurve.meta['OBJECT']}-c{str(self.lightcurve.meta['CAMPAIGN']).zfill(2)}"
@@ -58,7 +59,7 @@ class TTVModel:
     
     
     @staticmethod
-    def stitch_ttvs(TTVModels):
+    def stitch_ttvs(TTVModels, save=False):
         """ Stitch together the ttvs of several TTVModel objects. Return a tuple of lists of time vs ttvs + err. """
         
         mean_period = np.mean([model.p_ref for model in TTVModels])
@@ -83,30 +84,41 @@ class TTVModel:
         plt.errorbar(time, ttvs_mins, yerr=err_mins, fmt='.k')
         plt.ylabel("O - C [mins]")
         plt.xlabel("Time [Days]")
+        
+        if save: 
+            save_path = f"{TTVModels[0].save_path}/{TTVModels[0].lightcurve.meta['OBJECT']}_stitched_TTVs.png"
+            plt.savefig(save_path)
         plt.show()
         
         return (time, ttvs, err)
     
     
-    def optimise(self):
-        ### TODO: be certain of convergence - use logp values?
-        self.fit_shape()
-        self.fit_ttvs()
-        self.fit_shape()
-        self.fit_ttvs()
+    def optimise(self, verbose=True):
+        """ Optimise the orbital parameters and TTVs iteratively,  """
         
-        self.fit_shape(run_MCMC=True)
-        self.fit_ttvs(run_MCMC=True)
+        plt.figure()
+        self.lightcurve.errorbar()
+        plt.savefig(f"{self.save_path}/{self.save_name}_lightcurve.png")
+        plt.show()
+        
+        ### TODO: be certain of convergence - use logp values?
+        for n in range(3):
+            if not verbose: print(f"Loop {n+1} ...")
+            self.fit_shape(verbose=verbose)
+            self.fit_ttvs(verbose=verbose)
+        
+        self.fit_shape(run_MCMC=True, verbose=verbose)
+        self.fit_ttvs(run_MCMC=True, verbose=verbose)
         
         self.plot_folded(save=True)
         self.plot_ttvs(save=True)
+        self.plot_transits_stacked(save=True)
         
         print("Writing graphs and parameters to file.")
-        
         self.write_pars()
         
         
-    def fit_shape(self, run_MCMC=False, r_start=None, b_start=None):
+    def fit_shape(self, run_MCMC=False, r_start=None, b_start=None, verbose=True):
         """
         Fit the orbital parameters to the shape of the folded lightcurve data.
         
@@ -117,7 +129,7 @@ class TTVModel:
             b_start -- Starting estimate for the impact parameter.
         """
         
-        print("Optimising the shape of the orbital model:")
+        if verbose: print("Optimising the shape of the orbital model:")
         
         folded_lc = self.lightcurve.fold(self.p_ref, self.t0_ref, ttvs=self.pars['ttvs'])
         t = folded_lc.time * self.p_ref
@@ -138,28 +150,19 @@ class TTVModel:
             orbit = xo.orbits.KeplerianOrbit(period=self.p_ref, t0=t0, b=b)
 
             # Compute the model light curve
-            
-            a = xo.LimbDarkLightCurve(u)
-            b = a.get_light_curve(orbit=orbit, r=r, t=t)
-            light_curve = b.eval() + mean
-            
-            #light_curve = (
-            #    xo.LimbDarkLightCurve(u)
-            #    .get_light_curve(orbit=orbit, r=r, t=t)
-            #    .eval()
-            #    + mean
-            #)
+            lc = xo.LimbDarkLightCurve(u).get_light_curve(orbit=orbit, r=r, t=t)
+            light_curve = pm.math.sum(lc, axis=-1) + mean
 
             pm.Deterministic("light_curve", light_curve) # track the value of the model light curve for plotting purposes
 
             # The likelihood function
             pm.Normal("obs", mu=light_curve, sd=sd, observed=y)
             
-            map_soln = xo.optimize(start=model.test_point, verbose=True, progress_bar=False)
+            map_soln = xo.optimize(start=model.test_point, verbose=verbose, progress_bar=False)
         
         for k in ['mean', 't0', 'u', 'r', 'b']:
             self.pars[k] = map_soln[k]
-            print('\t', k, '=', self.pars[k])
+            if verbose: print('\t', k, '=', self.pars[k])
         
         if run_MCMC:
             np.random.seed(42)
@@ -178,24 +181,24 @@ class TTVModel:
                 self.pars['e_'+k] =   self.pars[k] - np.percentile(trace[k], 16, axis=0)
                 self.pars['E_'+k] = - self.pars[k] + np.percentile(trace[k], 84, axis=0)
                 
-                print(f"\t{k} = {self.pars[k]} /+ {self.pars['E_'+k]} /- {self.pars['e_'+k]}")
+                if verbose: print(f"\t{k} = {self.pars[k]} /+ {self.pars['E_'+k]} /- {self.pars['e_'+k]}")
             
     
-    def fit_ttvs(self, run_MCMC=False):
+    def fit_ttvs(self, run_MCMC=False, verbose=True):
         """
         Fit transit timing variations to each transit using the shape given by best-fit orbital parameters.
         """
         ttv_start = np.median(self.pars['ttvs']) + self.pars['t0']
         
         for n in range(self.num_transits):
-            self.fit_ttv(n, run_MCMC=run_MCMC, ttv_start=ttv_start)
+            self.fit_ttv(n, run_MCMC=run_MCMC, ttv_start=ttv_start, verbose=verbose)
         
     
-    def fit_ttv(self, n, run_MCMC=False, ttv_start=None):
+    def fit_ttv(self, n, run_MCMC=False, ttv_start=None, verbose=True):
         """
         Fit a single transit with a transit timing variation, using the shape given by best-fit orbital parameters.
         """
-        print("Fitting ttv for transit number", n)
+        if verbose: print("Fitting ttv for transit number", n)
         
         # Get the transit lightcurve
         transit = self.lightcurve.get_transit(n, self.p_ref, self.t0_ref)
@@ -228,7 +231,7 @@ class TTVModel:
             map_soln = xo.optimize(start=model.test_point, verbose=False, progress_bar=False)
         
         self.pars['ttvs'][n] = float(map_soln['ttv'])
-        print(f"\t ttv {n} = {self.pars['ttvs'][n]}")
+        if verbose: print(f"\t ttv {n} = {self.pars['ttvs'][n]}")
         
         if run_MCMC:
             np.random.seed(42)
@@ -246,7 +249,7 @@ class TTVModel:
             self.pars['e_ttvs'][n] =   self.pars['ttvs'][n] - np.percentile(trace['ttv'], 16, axis=0)
             self.pars['E_ttvs'][n] = - self.pars['ttvs'][n] + np.percentile(trace['ttv'], 84, axis=0)
             
-            print(f"\t ttv {n} = {self.pars['ttvs'][n]} /+ {self.pars['E_ttvs'][n]} /- {self.pars['e_ttvs'][n]}")
+            if verbose: print(f"\t ttv {n} = {self.pars['ttvs'][n]} /+ {self.pars['E_ttvs'][n]} /- {self.pars['e_ttvs'][n]}")
     
     
     def get_transit_curve(self, t, t_offset=0):
@@ -268,11 +271,12 @@ class TTVModel:
     
     def plot_ttvs(self, save=False):
         x = np.arange(len(self.pars['ttvs']))
-        ttvs_mins = [24*60*t for t in self.pars['ttvs']]
-        err_mins = [24*60*t for t in self.pars['ttvs_err']]
+        ttvs = [24*60*t for t in self.pars['ttvs']]
+        e = [24*60*t for t in self.pars['e_ttvs']]
+        E = [24*60*t for t in self.pars['E_ttvs']]
         
         plt.figure()
-        plt.errorbar(x, ttvs_mins, yerr=err_mins, fmt='.k')
+        plt.errorbar(x, ttvs, yerr=(e, E), fmt='.k')
         
         plt.xlabel("Transit Number")
         plt.ylabel("O - C [mins]")
@@ -312,11 +316,36 @@ class TTVModel:
         if save: plt.savefig(f"{self.save_path}/{self.save_name}_transit{n}.png")
         plt.title(f"Transit {n} for {self.lightcurve.label}")
         plt.show()
+        
+        
+    def plot_transits_stacked(self, save=False):
+        """ Plot all transits stacked vertically in a single figure. """
+        
+        fig = plt.figure(figsize=(10, 2.5*self.num_transits)) # , constrained_layout=True
+        gs = fig.add_gridspec(self.num_transits, hspace=0)
+        ax = gs.subplots(sharex=True, sharey=True)
+        
+        for n in range(self.num_transits):
+            transit = self.lightcurve.get_transit(n, self.p_ref, self.t0_ref)
+            ax[n].errorbar(transit.time, transit.flux, yerr=transit.flux_err, 
+                           fmt='none', ecolor='k', elinewidth=1)
+            
+            if 't0' in self.pars:
+                model = self.get_transit_curve(transit.time*self.p_ref, t_offset=self.pars['ttvs'][n])
+                ax[n].plot(transit.time, model, 'c', label="Model light curve")
+            
+            ax[n].annotate(f"Transit {n}", (10, 10), xycoords='axes pixels')
+            ax[n].set_xlim([-0.5, 0.5])
+            ax[n].label_outer()
+          
+        ax[0].set_title(f"Transits of {self.lightcurve.label}")
+        if save: fig.savefig(f"{self.save_path}/{self.save_name}_transits.png")
+        plt.show()
     
     
     def change_ref_period(self, p):
         """
-        Change the reference value for the period. Update the ttvs accordingly
+        Change the reference value for the period. Update the ttvs accordingly.
         """
         
         for n in range(self.num_transits):

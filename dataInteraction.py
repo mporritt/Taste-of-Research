@@ -1,6 +1,6 @@
 """
 dataInteraction.py by Michael Porritt
-Tooks for my personal storage of lightcurve data.
+Tooks for internal storage of lightcurve data.
 """
 
 import os
@@ -9,6 +9,27 @@ from astropy.io import ascii
 
 import TTVModel, TTVLightCurve
 
+
+def run(start_epic=None, verbose=True):
+    with open("Data/EPIC_list.txt", 'r') as f:
+        epics = [int(line[:-1]) for line in f.readlines()]
+
+    if start_epic is not None: epics = epics[epics.index(start_epic):]
+
+    for EPIC in epics:
+        campaign_list = []
+        for campaign in [5, 16, 18]:
+            print("="*100)
+            print(f"\t\t\t\tRUNNING EPIC {EPIC} CAMPAIGN {campaign}")
+            print("="*100)
+
+            model = read_data(EPIC, campaign)
+            if model is not None:
+                if model.p_ref > 0.7:
+                    model.optimise(verbose=verbose)
+                    campaign_list.append(model)
+            del model
+        TTVModel.TTVModel.stitch_ttvs(campaign_list, save=True)
 
 
 def read_data(EPIC, campaign, lookup_pars=True):
