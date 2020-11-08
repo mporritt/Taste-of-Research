@@ -69,19 +69,22 @@ class TTVModel:
         
         time = []
         ttvs = []
-        err = []
+        e = []
+        E = []
         
         for model in TTVModels:
             for n, ttv in enumerate(model.pars['ttvs']):
                 time.append(model.t0_ref + model.p_ref * n + ttv)
                 ttvs.append(ttv)
-                err.append(model.pars['ttvs_err'][n])
+                e.append(model.pars['e_ttvs'][n])
+                E.append(model.pars['E_ttvs'][n])
         
         ttvs_mins = [24*60*t for t in ttvs]
-        err_mins = [24*60*t for t in err]
+        e_mins = [24*60*t for t in e]
+        E_mins = [24*60*t for t in E]
     
         plt.figure()
-        plt.errorbar(time, ttvs_mins, yerr=err_mins, fmt='.k')
+        plt.errorbar(time, ttvs_mins, yerr=(e_mins, E_mins), fmt='.k')
         plt.ylabel("O - C [mins]")
         plt.xlabel("Time [Days]")
         
@@ -90,7 +93,7 @@ class TTVModel:
             plt.savefig(save_path)
         plt.show()
         
-        return (time, ttvs, err)
+        return (time, ttvs, e, E)
     
     
     def optimise(self, verbose=True):

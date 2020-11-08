@@ -25,39 +25,45 @@ def run(start_epic=None, verbose=True):
 
             model = read_data(EPIC, campaign)
             if model is not None:
-                if model.p_ref > 0.7:
+                if model.p_ref < 0.7: 
+                    print("Calculated period is less than 0.7 - analysis will not be performed.")
+                elif model.num_transits < 2: 
+                    print(f"Number of transits is not sufficient to yield meaningful results: {model.num_transits}")
+                else:
                     model.optimise(verbose=verbose)
                     campaign_list.append(model)
             del model
-        TTVModel.TTVModel.stitch_ttvs(campaign_list, save=True)
+            
+        if len(campaign_list) > 1:
+            TTVModel.TTVModel.stitch_ttvs(campaign_list, save=True)
 
 
-def read_data(EPIC, campaign, lookup_pars=True):
+def read_data(EPIC, campaign, lookup_pars=True, verbose=True):
     """ Retrieve the light curve for the given EPIC and campaign. """
     path = get_path(EPIC, campaign)
     save_path = f"Data/EPIC {EPIC}"
     
     t0_ref, p_ref = None, None
     if lookup_pars:
-        t0_ref, p_ref = parameter_lookup(EPIC)
+        t0_ref, p_ref = parameter_lookup(EPIC, verbose=verbose)
     
     if os.path.isfile(path):
         return TTVModel.TTVModel.from_fits(path, p_ref=p_ref, save_path=save_path)
     else:
-        print(f"File not Found: EPIC {EPIC}, campaign {campaign}.")
+        if verbose: print(f"File not Found: EPIC {EPIC}, campaign {campaign}.")
     return
 
 
-def parameter_lookup(search_id):
+def parameter_lookup(search_id, verbose=True):
     search_id = int(search_id)
     table = ascii.read("Data/apjsab346bt7_mrt.txt")
 
     for id, p, t0 in table.iterrows('ID', 'P', 't0'):
         if int(id) == search_id:
-            print(f"Found parameters: t0 = {t0 + 167}, p = {p}")
+            if verbose: print(f"Found parameters: t0 = {t0 + 167}, p = {p}")
             return (t0+167, p)
 
-    print(f"Parameters for system {search_id} not found :(")
+    if verbose: print(f"Parameters for system {search_id} not found :(")
     return (None, None)
 
         
