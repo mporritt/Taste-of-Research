@@ -11,12 +11,9 @@ import TTVModel, TTVLightCurve
 
 
 def run(start_epic=None, verbose=True):
-    with open("Data/EPIC_list.txt", 'r') as f:
-        epics = [int(line[:-1]) for line in f.readlines()]
-
-    if start_epic is not None: epics = epics[epics.index(start_epic):]
-
-    for EPIC in epics:
+    
+    for EPIC in get_EPICs(start_epic=start_epic):
+        
         campaign_list = []
         for campaign in [5, 16, 18]:
             print("="*100)
@@ -37,6 +34,15 @@ def run(start_epic=None, verbose=True):
         if len(campaign_list) > 1:
             TTVModel.TTVModel.stitch_ttvs(campaign_list, save=True)
 
+            
+def get_EPICs(start_epic=None):
+    with open("Data/EPIC_list.txt", 'r') as f:
+        epics = [int(line[:-1]) for line in f.readlines()]
+
+    if start_epic is not None: epics = epics[epics.index(start_epic):]
+    
+    return epics
+        
 
 def read_data(EPIC, campaign, lookup_pars=True, verbose=True):
     """ Retrieve the light curve for the given EPIC and campaign. """
@@ -72,3 +78,40 @@ def get_path(EPIC, campaign):
            f"hlsp_everest_k2_llc_{EPIC}-c{str(campaign).zfill(2)}_kepler_v2.0_lc/" + \
            f"hlsp_everest_k2_llc_{EPIC}-c{str(campaign).zfill(2)}_kepler_v2.0_lc.fits"
     return path
+
+
+def stitch_all(start_epic=None):
+    for EPIC in get_EPICs(start_epic=start_epic):
+        stitch_ttvs(EPIC, save=True)
+        
+    print("All Done Stitching :D")
+    
+
+def stitch_ttvs(EPIC, save=False):
+    print("="*80)
+    print(f"\t\t\tStitching EPIC {EPIC}")
+    print("="*80)
+    
+    models = []
+    for campaign in [5, 16, 18]:
+        fitsfile = get_path(EPIC, campaign)
+        if not os.path.isfile(fitsfile):
+            print(f"File not found: {fitsfile}")
+            continue
+        
+        txtfile = f"Data/EPIC {EPIC}/EPIC {EPIC}-c{str(campaign).zfill(2)}_pars.txt"
+        if not os.path.isfile(txtfile):
+            print(f"File not found: {txtfile}")
+            continue
+        
+        save_path = f"Data/EPIC {EPIC}"
+        models.append(TTVModel.TTVModel.from_txt(fitsfile, txtfile, save_path=save_path))
+    
+    return TTVModel.TTVModel.stitch_ttvs(models, save=save)
+    
+    
+    
+        
+
+        
+        
