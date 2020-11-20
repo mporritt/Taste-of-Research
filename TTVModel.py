@@ -20,7 +20,7 @@ class TTVModel:
     A model intended to explicitely describe the ttvs (transit timing variations) in a planets transits, as well as its orbital parameters.
     """
     
-    def __init__(self, lightcurve, p_ref=None, save_path="."):
+    def __init__(self, lightcurve, p_ref, t0_ref, pars, num_transits=None, save_path=None):
         """ 
         Construct a Model given a lightcurve.
         
@@ -28,44 +28,117 @@ class TTVModel:
             lightcurve -- A lightkurve.LightCurve object, including flux_err values. This must be flattened and it is a good idea to remove 
                           extreme outliers as well.
             p_ref -- Optional. The period of transit. Will be determined using BLS if not supplied.
-            t0_ref -- Optional. The time of the first transit. Will be determined using BLS if not supplied.
-        """        
+        """
         self.lightcurve = lightcurve
         
-        # Reference values for period and t0
-        t0_ref, p_ref, num_transits = self.get_ref_vals(p_ref=p_ref)
         self.p_ref = p_ref
         self.t0_ref = t0_ref
         self.num_transits = num_transits
+        if not self.num_transits:
+            self.num_transits = int( ( (self.lightcurve.time[-1] - self.t0_ref) // self.p_ref ) + 1)
+        
         print(f"Reference parameters: t0={t0_ref}, period={p_ref}, num_transits={num_transits}")
         
-        self.pars = {}    # Dictionary of orbital model parameters
-        self.pars['ttvs'] = [0] * self.num_transits    # List of ttvs for each transit
-        self.pars['e_ttvs'] = [0] * self.num_transits
-        self.pars['E_ttvs'] = [0] * self.num_transits
+        self.pars = pars
         
         self.save_path = save_path
+        if not self.save_path:
+            save_path = "./"
         self.save_name = f"{self.lightcurve.meta['OBJECT']}-c{str(self.lightcurve.meta['CAMPAIGN']).zfill(2)}"
+        
+        
+    
+    @classmethod
+    def from_lightkurve(cls, lightcurve, p_ref=None, save_path=None):
+        # Reference values for period and t0
+        t0_ref, p_ref, num_transits = cls.get_ref_vals(lightcurve, p_ref=p_ref)
+        
+        pars = {}    # Dictionary of orbital model parameters
+        pars['ttvs'] = [0] * num_transits    # List of ttvs for each transit
+        pars['e_ttvs'] = [0] * num_transits
+        pars['E_ttvs'] = [0] * num_transits
+        
+        return TTVModel(lightcurve, p_ref, t0_ref, pars, num_transits=num_transits, save_path=save_path)
     
     
-    @staticmethod
-    def from_fits(filename, p_ref=None, save_path=""):
+    @classmethod
+    def from_fits(cls, filename, p_ref=None, save_path=None):
         """ Return a TTVModel given the filename of the everest light curve """
         lc = TTVLightCurve.from_fits(filename)
         lc = lc.flatten()
         lc = lc.remove_outliers(sigma_lower=10, sigma_upper=5)
         
-        return TTVModel(lc, p_ref=p_ref, save_path=save_path)
+        return cls.from_lightkurve(lc, p_ref=p_ref, save_path=save_path)        
+  
+    
+    @classmethod
+    def from_txt(cls, fitsfile, txtfile, save_path=None):
+        
+        lc = TTVLightCurve.from_fits(fitsfile)
+        lc = lc.flatten()
+        lc = lc.remove_outliers(sigma_lower=10, sigma_upper=5)
+        
+        pars = {}
+        with open(txtfile, 'r') as f:
+            for line in f:
+                if '=' in line:
+                    k, val = line.strip().split('=')
+                    
+                    if '[' in val:
+                        val = val.replace("[", "").replace("]","").replace(",","").strip()
+                        pars[k] = [float(f) for f in val.split()]
+                    else:
+                        pars[k] = float(val)
+        
+        p_ref = pars.pop('p_ref')
+        t0_ref = pars.pop('t0_ref')
+        num_transits = len(pars['ttvs'])
+        
+        return TTVModel(lc, p_ref, t0_ref, pars, num_transits=num_transits, save_path=save_path)
+    
+    
+    @staticmethod    
+    def get_ref_vals(lightcurve, p_ref=None):
+        t = lightcurve.time
+        y = lightcurve.flux
+        dy = lightcurve.flux_err
+
+        bls = BoxLeastSquares(t, y, dy)
+        durations = [0.05,0.1,0.2]
+        if p_ref is None:
+            periodogram = bls.autopower(durations)
+        else:
+            periods = np.linspace(p_ref*0.9, p_ref*1.1, 5000)
+            periodogram = bls.power(periods, durations)
+
+        max_power = np.argmax(periodogram.power)
+        stats = bls.compute_stats(periodogram.period[max_power],
+                                  periodogram.duration[max_power],
+                                  periodogram.transit_time[max_power])
+        num_transits = len(stats['transit_times'])
+        t0 = periodogram.transit_time[max_power]
+        p = periodogram.period[max_power]
+        
+        return (t0, p, num_transits)
     
     
     @staticmethod
     def stitch_ttvs(TTVModels, save=False):
-        """ Stitch together the ttvs of several TTVModel objects. Return a tuple of lists of time vs ttvs + err. """
-        
-        mean_period = np.mean([model.p_ref for model in TTVModels])
+        """ Stitch together the ttvs of several TTVModel objects. Return a tuple of lists of (time, ttvs, e_ttvs, E_ttvs). """
+        if not TTVModels: return (None, None, None, None)    
         
         for model in TTVModels:
-            model.change_ref_period(mean_period)
+            if 'e_ttvs' not in model.pars:
+                return (None, None, None, None)
+                
+        if not TTVModels: return (None, None, None, None)    
+        
+        
+        mean_period = np.mean([model.p_ref for model in TTVModels])
+        t0 = min([model.t0_ref for model in TTVModels])
+        
+        for model in TTVModels:
+            model.change_ref_vals(mean_period, t0)
         
         time = []
         ttvs = []
@@ -115,7 +188,8 @@ class TTVModel:
         
         self.plot_folded(save=True)
         self.plot_ttvs(save=True)
-        self.plot_transits_stacked(save=True)
+        if self.num_transits > 1: 
+            self.plot_transits_stacked(save=True)
         
         print("Writing graphs and parameters to file.")
         self.write_pars()
@@ -344,52 +418,46 @@ class TTVModel:
         ax[0].set_title(f"Transits of {self.lightcurve.label}")
         if save: fig.savefig(f"{self.save_path}/{self.save_name}_transits.png")
         plt.show()
-    
-    
-    def change_ref_period(self, p):
-        """
-        Change the reference value for the period. Update the ttvs accordingly.
-        """
+        
+        
+    def get_transit_times(self):
+        tts = []
         
         for n in range(self.num_transits):
-            self.pars['ttvs'][n] = self.pars['ttvs'][n] + n * (self.p_ref - p)
+            tts.append(self.t0_ref + n * self.p_ref + self.pars['ttvs'][n])
+            
+        e_tts = self.pars['e_ttvs']
+        E_tts = self.pars['E_ttvs']
+        
+        return (tts, e_tts, E_tts)
+    
+    
+    def change_ref_vals(self, p, t0):
+        """
+        Change the reference value for the period and t0. Update the ttvs accordingly.
+        """
+        
+        # Get the "reference transit" in case the given t0 corresponds to a different transit.
+        n_0 = round((self.t0_ref - t0) / p)
+        # Set t0 so that it definitely corresponds to the first transit in the data set. if n_0==0 then the given t0 was correct.
+        t0 = t0 + n_0 * p
+        
+        for n in range(self.num_transits):
+            transit_time = self.t0_ref + n * self.p_ref + self.pars['ttvs'][n]
+            self.pars['ttvs'][n] = transit_time - t0 - n * self.p_ref
 
         self.p_ref = p
+        self.t0_ref = t0
         return
-        
-        
-    def get_ref_vals(self, p_ref=None):
-        t = self.lightcurve.time
-        y = self.lightcurve.flux
-        dy = self.lightcurve.flux_err
-
-        bls = BoxLeastSquares(t, y, dy)
-        durations = [0.05,0.1,0.2]
-        if p_ref is None:
-            periodogram = bls.autopower(durations)
-        else:
-            periods = np.linspace(p_ref*0.9, p_ref*1.1, 5000)
-            periodogram = bls.power(periods, durations)
-
-        max_power = np.argmax(periodogram.power)
-        stats = bls.compute_stats(periodogram.period[max_power],
-                                  periodogram.duration[max_power],
-                                  periodogram.transit_time[max_power])
-        num_transits = len(stats['transit_times'])
-        t0 = periodogram.transit_time[max_power]
-        p = periodogram.period[max_power]
-        
-        return (t0, p, num_transits)
         
         
     def write_pars(self):
         """ Write all the parameter values to a file in the save path """
         path = f"{self.save_path}/{self.save_name}_pars.txt"
         
-        s = f"""{path} : Parameter values
-        p_ref={self.p_ref}
-        t0_ref={self.t0_ref}
-        """
+        s = f"{path} : Parameter values\n" + \
+            f"p_ref={self.p_ref}\n" + \
+            f"t0_ref={self.t0_ref}\n"
             
         for k in self.pars:
             s += f"{k}={self.pars[k]}\n"

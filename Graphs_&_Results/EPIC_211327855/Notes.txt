@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211327855 by Michael Porritt on 16/11/20",
+    "Reference Periods" : "1.724418321864373, 1.7694574260852172",
+    "Good TTV candidate" : "F",
+    "Good Fit" : "T",
+    "Most likely" : "disappearing planet",
+    "Additional Notes" : "Planet disappears in campaign 18"
+}
