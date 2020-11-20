@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211733267 by Michael Porritt on 16/11/20",
+    "Reference Periods" : "8.661433752490499, 8.661433752490499, 8.655198642508502",
+    "Good TTV candidate" : "T",
+    "Good Fit" : "F",
+    "Most likely" : "planet",
+    "Additional Notes" : "Data points cut off the bottom of most transits. TTVs should be fairly representative but orbital parameters are likely far off. Very distinguished TTVs."
+}
