@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211897691 by Michael Porritt on 17/11/20",
+    "Reference Periods" : "5.750865100220045, 5.751785367473495, 5.750174899779957",
+    "Good TTV candidate" : "T",
+    "Good Fit" : "T",
+    "Most likely" : "planet",
+    "Additional Notes" : "Very good TTV candidate. There is probably a planet at roughly 3.5 the period of the identified planet (~20 days). This is a likely candidate for the perturber. Also a possible single transit event in c18."
+}
