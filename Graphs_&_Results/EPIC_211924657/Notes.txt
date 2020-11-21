@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211924657 by Michael Porritt on 16/11/20",
+    "Reference Periods" : "2.645378839767954, 2.6556377801960394, 2.67002144924985",
+    "Good TTV candidate" : "T",
+    "Good Fit" : "T",
+    "Most likely" : "planet",
+    "Additional Notes" : "K2-146. Other planet is known at a 4 day period."
+}
