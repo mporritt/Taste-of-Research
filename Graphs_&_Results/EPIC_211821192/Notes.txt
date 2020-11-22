@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211821192 by Michael Porritt on 16/11/20",
+    "Reference Periods" : "37.41179661929183, 19.153464790448883",
+    "Good TTV candidate" : "F",
+    "Good Fit" : "F",
+    "Most likely" : "single transit",
+    "Additional Notes" : "Single transits in both campaigns."
+}

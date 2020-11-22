@@ -1,0 +1,8 @@
+{
+    "Tag" : "Notes for EPIC 211331236 by Michael Porritt on 16/11/20",
+    "Reference Periods" : "1.2914758136627325, 1.2914758136627325",
+    "Good TTV candidate" : "T",
+    "Good Fit" : "T",
+    "Most likely" : "planet",
+    "Additional Notes" : "[Notes]"
+}
